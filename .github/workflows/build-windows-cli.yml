@@ -1,0 +1,46 @@
+name: Build Codex CLI (Windows)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ build ]
+
+jobs:
+  build:
+    name: Build Codex CLI Windows x86_64
+    runs-on: windows-latest
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.95.0
+          targets: x86_64-pc-windows-msvc
+
+      - name: Setup rusty-v8 prebuilt binaries
+        uses: ./.github/actions/setup-rusty-v8
+        with:
+          target: x86_64-pc-windows-msvc
+
+      - name: Setup MSVC environment
+        uses: ./.github/actions/setup-msvc-env
+        with:
+          target: x86_64-pc-windows-msvc
+
+      - name: Build codex-cli
+        shell: bash
+        run: |
+          cd codex-rs
+          export LIBSQLITE3_FLAGS=SQLITE_DISABLE_INTRINSIC
+          export STABLE_GIT_COMMIT="$(git rev-parse HEAD)"
+          cargo build --target x86_64-pc-windows-msvc --release --bin codex
+
+      - name: Upload codex.exe
+        uses: actions/upload-artifact@v4
+        with:
+          name: codex-windows-x86_64
+          path: codex-rs/target/x86_64-pc-windows-msvc/release/codex.exe

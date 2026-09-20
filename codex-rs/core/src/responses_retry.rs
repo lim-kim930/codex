@@ -75,16 +75,29 @@ pub(crate) async fn handle_response_stream_error(
         && !turn_context.provider.info().is_amazon_bedrock()
     {
         let retry_delay = retry_state.connection_retry_delay;
+        retry_state.connection_retries = retry_state.connection_retries.saturating_add(1);
+        let attempt = retry_state.connection_retries;
         warn!(
             turn_id = %turn_context.sub_id,
             error = %err,
             ?retry_delay,
             "stream connection failed; waiting to retry"
         );
-        sess.notify_stream_error(turn_context, "Reconnecting... waiting for network", err)
-            .await;
-        retry_state.connection_retries = retry_state.connection_retries.saturating_add(1);
-        codex_client::record_retry!(retry_state.connection_retries, retry_delay, operation);
+        let err_desc = format!("{err:#}");
+        sess.send_event(
+            turn_context,
+            EventMsg::Warning(WarningEvent {
+                message: format!("⚠️ 连接服务失败: {err_desc}，正在重试 [{attempt}/{max_retries}]..."),
+            }),
+        )
+        .await;
+        sess.notify_stream_error(
+            turn_context,
+            format!("连接失败，正在重试 [{attempt}/{max_retries}]..."),
+            err,
+        )
+        .await;
+        codex_client::record_retry!(attempt, retry_delay, operation);
         tokio::time::sleep(retry_delay).await;
         retry_state.connection_retry_delay = retry_delay
             .saturating_mul(2)
@@ -114,21 +127,22 @@ pub(crate) async fn handle_response_stream_error(
         retry_state.retries = retry_count;
         log_retry(request, turn_context, &err, retry_count, max_retries, delay);
 
-        // In release builds, hide the first websocket retry notification to reduce noisy
-        // transient reconnect messages. In debug builds, keep full visibility for diagnosis.
-        let report_error = retry_count > 1
-            || cfg!(debug_assertions)
-            || !sess.services.model_client.responses_websocket_enabled();
-        if report_error {
-            // Surface retry information to any UI/front-end so the user understands what is
-            // happening instead of staring at a seemingly frozen screen.
-            sess.notify_stream_error(
-                turn_context,
-                format!("Reconnecting... {retry_count}/{max_retries}"),
-                err,
-            )
-            .await;
-        }
+        let err_desc = format!("{err:#}");
+        sess.send_event(
+            turn_context,
+            EventMsg::Warning(WarningEvent {
+                message: format!("⚠️ 请求失败: {err_desc}，正在重试 [{retry_count}/{max_retries}]..."),
+            }),
+        )
+        .await;
+
+        sess.notify_stream_error(
+            turn_context,
+            format!("请求失败，正在重试 [{retry_count}/{max_retries}]..."),
+            err,
+        )
+        .await;
+
         codex_client::record_retry!(retry_count, delay, operation);
         tokio::time::sleep(delay).await;
         return Ok(());

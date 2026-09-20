@@ -39,14 +39,7 @@ impl RetryOn {
 }
 
 pub fn backoff(base: Duration, attempt: u64) -> Duration {
-    if attempt == 0 {
-        return base;
-    }
-    let exp = 2u64.saturating_pow(attempt as u32 - 1);
-    let millis = base.as_millis() as u64;
-    let raw = millis.saturating_mul(exp);
-    let jitter: f64 = rand::rng().random_range(0.9..1.1);
-    Duration::from_millis((raw as f64 * jitter) as u64)
+    Duration::ZERO
 }
 
 /// Identifies a retry path and its associated trace-event layer.
@@ -98,6 +91,8 @@ where
                     .should_retry(&err, attempt, policy.max_attempts) =>
             {
                 let retry_attempt = attempt + 1;
+                let max_attempts = policy.max_attempts;
+                eprintln!("⚠️ [HTTP 请求失败]: {err}，正在重试 [{retry_attempt}/{max_attempts}]...");
                 // TODO(anp): Respect Retry-After from HTTP responses before retrying the request.
                 let delay = backoff(policy.base_delay, retry_attempt);
                 crate::record_retry!(retry_attempt, delay, RetryOperation::HttpRequest);
